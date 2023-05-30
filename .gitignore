@@ -1,0 +1,10 @@
+__pycache__/
+__pycache__
+slurm_output
+tensorboard
+runs
+datasets
+*.sh
+hyperparams.py
+create_annotations_similarity_dataset.py
+clear_text_df_from_empty_values.py
