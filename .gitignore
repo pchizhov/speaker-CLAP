@@ -3,7 +3,6 @@ __pycache__
 slurm_output
 tensorboard
 runs
-datasets
 *.sh
 hyperparams.py
 create_annotations_similarity_dataset.py

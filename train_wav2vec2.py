@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from transformers import Wav2Vec2Processor, Wav2Vec2Model
+from transformers import Wav2Vec2FeatureExtractor, Wav2Vec2Model
 from torch.utils.tensorboard import SummaryWriter
 
 from utils.custom_datasets import AudioDataset
@@ -25,7 +25,7 @@ def train_wav2vec2(hparams):
     train_dataloader = DataLoader(AudioDataset(train_dataframe, device, hparams), batch_size=8, shuffle=True)
     test_dataloader = DataLoader(AudioDataset(test_dataframe, device, hparams), batch_size=8, shuffle=True)
 
-    processor = Wav2Vec2Processor.from_pretrained(hparams["wav2vec2_model"])
+    processor = Wav2Vec2FeatureExtractor.from_pretrained(hparams["wav2vec2_model"])
     wav2vec2 = Wav2Vec2Model.from_pretrained(hparams["wav2vec2_model"]).to(device)
     model = SpeakerEncoder(wav2vec2, processor, hparams, device).to(device)
     if hparams["wav2vec2_checkpoint"] != "":

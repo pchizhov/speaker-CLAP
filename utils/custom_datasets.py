@@ -26,10 +26,15 @@ class AudioDataset(Dataset):
 
         return self._fix_path(audio_path1), self._fix_path(audio_path2), similarity.to(device=self.device)
 
+    # audio encoder in standalone training is trained on a whole VCTK dataset. Here we provide a path to the dataset folder for VCTK audio samples 
     def _fix_path(self, path):
+        # Common Voice audio samples use the same path
         if os.path.isfile(path[:-4] + ".mp3"):
-            return path[:-4] + ".mp3"
+            return path
+
+        # VCTK audio samples have separate folder
         else:
+            # extracting the name of the speaker from the original audio file path
             vctk_speaker_id = path.split("_")[1].split("/")[-1]
             src_folder = self.hparams["VCTK_dir"]
             return os.path.join(src_folder, vctk_speaker_id, path[:-4].split("/")[-1] + "_mic1.flac")
@@ -74,4 +79,8 @@ class AnnotationsDataset(Dataset):
     def __getitem__(self, idx):
         audio_path = self.audio_path.iloc[idx]
         audio_path = os.path.join(self.hparams["audio_path"], audio_path)
-        return audio_path, self.text_model.tokenize([self.transcription.iloc[idx]]), torch.tensor(self.similarity.iloc[idx], device=self.device)
+
+        # apply tokenization of the textual descriptions
+        tokenized_sentence = self.text_model.tokenize([self.transcription.iloc[idx]])
+        
+        return audio_path, tokenized_sentence, torch.tensor(self.similarity.iloc[idx], device=self.device)

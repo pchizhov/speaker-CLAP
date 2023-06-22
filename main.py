@@ -6,14 +6,6 @@ from train_sbert import train_sbert
 from train_wav2vec2 import train_wav2vec2
 from eval_encoders import eval_encoders
 
-from hyperparams import hparams
-
-#DONE: use MAE loss
-#DONE: split 1000 for dev set
-#DONE: look up for evaluation metric in CLIP paper
-#TODO: add method in main.py for evaluating the models
-#TODO: train both models without SBERT fine-tuning
-
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', nargs='?', help="both / wav2vec2 / sbert", default="both", type=str)

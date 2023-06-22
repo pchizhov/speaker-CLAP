@@ -8,7 +8,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from transformers import Wav2Vec2Processor, Wav2Vec2Model, Wav2Vec2FeatureExtractor
+from transformers import Wav2Vec2Model, Wav2Vec2FeatureExtractor
 from sentence_transformers import SentenceTransformer
 
 from utils.custom_datasets import AnnotationsDataset
@@ -17,29 +17,38 @@ from utils.speaker_encoder import SpeakerEncoder
 
 def train_encoders(hparams):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    #create a directory to store training checkpoints
     output_directory = os.path.join('runs', "encoders_" + datetime.now().strftime("%b%d_%H_%M_%S"))
     os.makedirs(output_directory)
+
     writer = SummaryWriter(output_directory)
     print(f'Use CUDA: {hparams["use_cuda"]}')
 
     text_model = SentenceTransformer(hparams["sbert_model"], device=device)
     text_model = text_model.to(device=device)
+
+    # load sbert checkpoint if provided
     if hparams["sbert_checkpoint"] != "":
         print("sbert loaded!")
         text_model.load_state_dict(torch.load(hparams["sbert_checkpoint"], map_location=device)["state_dict"])
+
     text_learning_rate = hparams["text_learning_rate"]
     text_optimizer = optim.AdamW(text_model.parameters(), lr=text_learning_rate)
 
-    # processor = Wav2Vec2Processor.from_pretrained(hparams["wav2vec2_model"])
     processor = Wav2Vec2FeatureExtractor.from_pretrained(hparams["wav2vec2_model"])
     wav2vec2 = Wav2Vec2Model.from_pretrained(hparams["wav2vec2_model"]).to(device)
     audio_model = SpeakerEncoder(wav2vec2, processor, hparams, device).to(device)
+
+    # load wav2vec2 checkpoint if provided
     if hparams["wav2vec2_checkpoint"] != "":
         print("wav2vec2 loaded!")
         audio_model.load_state_dict(torch.load(hparams["wav2vec2_checkpoint"], map_location=device)["state_dict"])
+
     audio_learning_rate = hparams["audio_learning_rate"]
     audio_optimizer = optim.AdamW(audio_model.parameters(), lr=audio_learning_rate)
 
+    # collate function for data loader. will return 3 separate batches: for audio, text and labels
     def collate_fn(batch):
         audio_paths = []
         sentence_features = []
@@ -49,8 +58,8 @@ def train_encoders(hparams):
             audio_path = example[0]
             audio_paths.append(audio_path)
 
-            text = example[1]
-            sentence_features.append(text)
+            sentence_feature = example[1]
+            sentence_features.append(sentence_feature)
 
             label = example[2]
             labels.append(label)
@@ -60,8 +69,9 @@ def train_encoders(hparams):
         return audio_paths, sentence_features, labels
 
     train_dataframe, test_dataframe = get_train_test_dataframes(hparams["annotations_df_dir"])
-    # train_dataframe = train_dataframe[:int(len(train_dataframe)*0.5)]
     print(len(train_dataframe), len(test_dataframe))
+
+    # data loaders with custom datasets
     train_dataloader = DataLoader(AnnotationsDataset(train_dataframe, text_model, device, hparams), 
                                 batch_size=8, shuffle=True, collate_fn=collate_fn)
     test_dataloader = DataLoader(AnnotationsDataset(test_dataframe, text_model, device, hparams), 
@@ -75,14 +85,14 @@ def train_encoders(hparams):
     tensorboard_val_step = 0
     max_grad_norm = 1.
 
-    for epoch in range(hparams["epochs"]):
-        iteration = epoch + 1
-        print(f'Epoch: {iteration}')
+    for epoch in range(1, hparams["epochs"]):
+        print(f'Epoch: {epoch}')
 
         criterion.train()
         audio_model.train()
         text_model.train()
 
+        # freezing of either of the models if provided
         if hparams["freeze_model"] == "wav2vec2":
             audio_model.eval()
         if hparams["freeze_model"] == "sbert":
@@ -97,28 +107,33 @@ def train_encoders(hparams):
 
             vec_1 = audio_model(audio)
             vec_2 = torch.cat([text_model(sentence_feature)['sentence_embedding'] for sentence_feature in sentence_features])
+
             loss = criterion(torch.cosine_similarity(vec_1, vec_2), similarity)
             running_loss += loss.item()
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(criterion.parameters(), max_grad_norm)
+
+            # freezing of either of the models if provided
             if hparams["freeze_model"] != "wav2vec2":
                 audio_optimizer.step()
             if hparams["freeze_model"] != "sbert":
                 text_optimizer.step()
 
+            # empty cuda memory (did not resolve 'CUDA out of memory' issue)
             del audio, sentence_features, similarity, vec_1, vec_2
             torch.cuda.empty_cache()
             gc.collect()
 
-
+            # write to tensorboard
             writer.add_scalar("Loss/train", loss.item(), tensorboard_train_step)
             tensorboard_train_step += 1
 
             if i % 200 == 199:
-                print("TRAIN - Epoch: {}; Iter: {}; Loss: {:.6f}".format(iteration, i, running_loss/200))
+                print("TRAIN - Epoch: {}; Iter: {}; Loss: {:.6f}".format(epoch, i, running_loss/200))
                 running_loss = 0
 
+            # validation after every 2000 batches
             if i % 2000 == 1999:
                 print("EVALUATION")
                 criterion.eval()
@@ -127,6 +142,8 @@ def train_encoders(hparams):
                 with torch.no_grad():
                     running_val_loss = 0
                     for j, (audio, sentence_features, similarity) in enumerate(test_dataloader):
+
+                        # move sentence feature tensors to device
                         sentence_features = list(map(lambda batch: sentence_features_to_device(batch, device), sentence_features))
 
                         vec_1 = audio_model(audio)
@@ -135,10 +152,11 @@ def train_encoders(hparams):
                         running_val_loss += loss.item()
 
                     avg_val_loss = running_val_loss/(j+1)
-                    print(f'Validation loss {iteration}: {avg_val_loss}')
+                    print(f'Validation loss {epoch}: {avg_val_loss}')
                     writer.add_scalar("Loss/test", avg_val_loss, tensorboard_val_step)
                     tensorboard_val_step += 1
 
+                    # save models checkpoints with lowest average loss
                     if avg_val_loss < best_val_loss:
                         best_val_loss = avg_val_loss
 

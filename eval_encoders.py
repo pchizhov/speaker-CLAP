@@ -73,11 +73,6 @@ def eval_encoders(hparams):
             running_val_loss += loss.item()
             loss_list.append(loss.item())
             print(similarity, cos, loss.item())
-            # if loss.item() > 0.9:
-            #     print(vec_1[:, :15], vec_2[:, :15])
-            #     print()
-            # if similarity == 1. and cos < 0.1:
-            #     print(audio[0].split("/")[-1], "\n")
 
         avg_val_loss = running_val_loss/(i+1)
         print(f"Average Loss: {avg_val_loss}")
